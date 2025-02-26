@@ -14,7 +14,7 @@ local CONSECRATION = "Consecration"
 local HOLY_STRIKE = "Holy Strike"
 local HAND_OF_PROTECTION = "Hand of Protection"
 local LAY_ON_HANDS = "Lay on Hands(Rank 2)"
-local DISPEL = "Purify"
+local DISPEL = "Cleanse"
 local FREEDOM = "Hand of Freedom"
 local FLASH_OF_LIGHT = "Flash of Light" -- New healing spell
 local strikeWeave = 0
@@ -33,6 +33,16 @@ local DEBUFFS_TO_DISPEL = {
     "NullifyDisease",
     "Poison",
     "CreepingPlague",
+    "ShadowWordPain",
+    "Polymorph",
+    "Immolation",
+    "Sleep",
+    "FrostNova",
+    "FlameShock",
+    "ThunderClap",
+    "Nature_Sleep",
+    "StrangleVines",
+    "Slow",
     -- Add more debuff names here as needed
 }
 
@@ -171,10 +181,17 @@ local function ApplyPartyBuffs()
 end
 
 -- Function to check and cast abilities
+-- Function to check and cast abilities
 local function CastAbilities()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
     local manaPercentage = (currentMana / maxMana) * 100
+
+    -- Check if target exists and is attackable
+    local target = "target"
+    if not UnitExists(target) or not UnitCanAttack("player", target) then
+        return -- Exit if there is no target or the target is not attackable
+    end
 
     -- Check if Seal of Command is active and throttle Judgement
     if buffed(SEAL_OF_COMMAND, "player") then
@@ -191,7 +208,7 @@ local function CastAbilities()
 
     -- Check if Seal of Wisdom is active and target does not have Judgement of Wisdom (debuff)
     if buffed(SEAL_OF_WISDOM, "player") then
-        if not HasDebuff("target", {"Judgement of Wisdom"}) then
+        if not buffed("Judgement of Wisdom", target) then
             if IsSpellReady(JUDGEMENT) then
                 CastSpellByName(JUDGEMENT)
             end
