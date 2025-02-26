@@ -18,7 +18,7 @@ local DISPEL = "Cleanse"
 local FREEDOM = "Hand of Freedom"
 local FLASH_OF_LIGHT = "Flash of Light" -- New healing spell
 local strikeWeave = 0
-local threatmode = 0
+local threatmode = 1
 
 -- Throttle variables for Judgement
 local sealOfCommandCastTime = 0
@@ -191,6 +191,13 @@ local function CastAbilities()
     local target = "target"
     if not UnitExists(target) or not UnitCanAttack("player", target) then
         return -- Exit if there is no target or the target is not attackable
+    end
+
+    -- Check if the target is Undead and Exorcism is ready
+    local creatureType = UnitCreatureType(target)
+    if creatureType == "Undead" and IsSpellReady("Exorcism") then
+        CastSpellByName("Exorcism")
+        return -- Exit after casting Exorcism to prioritize it
     end
 
     -- Check if Seal of Command is active and throttle Judgement
