@@ -6,8 +6,7 @@ local BLESSING_OF_MIGHT = "Blessing of Might"
 local BLESSING_OF_WISDOM = "Blessing of Wisdom"
 local DEVOTION_AURA = "Devotion Aura"
 local RIGHTEOUS_FURY = "Righteous Fury"
-local SEAL_OF_RIGHTEOUSNESS = "Seal of Command"
---local SEAL_OF_RIGHTEOUSNESS = "Seal of Righteousness"
+local SEAL_OF_COMMAND = "Seal of Command"
 local SEAL_OF_WISDOM = "Seal of Wisdom"
 local JUDGEMENT = "Judgement"
 local CRUSADER_STRIKE = "Crusader Strike"
@@ -21,6 +20,10 @@ local FLASH_OF_LIGHT = "Flash of Light" -- New healing spell
 local strikeWeave = 0
 local threatmode = 0
 
+-- Throttle variables for Judgement
+local sealOfCommandCastTime = 0
+local judgementThrottleDuration = 20 -- 20 seconds throttle
+
 -- Debuff Lists
 local DEBUFFS_TO_DISPEL = {
     "Nature_Regenerate",
@@ -29,6 +32,7 @@ local DEBUFFS_TO_DISPEL = {
     "CorrosiveBreath",
     "NullifyDisease",
     "Poison",
+    "CreepingPlague",
     -- Add more debuff names here as needed
 }
 
@@ -80,6 +84,17 @@ local function HasDebuff(unit, debuffList)
     return false
 end
 
+-- Function to check if a unit has a specific buff
+local function HasBuff(unit, buffName)
+    for i = 1, 16 do
+        local name = UnitBuff(unit, i)
+        if name and strfind(name, buffName) then
+            return true
+        end
+    end
+    return false
+end
+
 -- Function to apply buffs to the player
 local function ApplyPlayerBuffs()
     local currentMana = UnitMana("player")
@@ -92,10 +107,11 @@ local function ApplyPlayerBuffs()
         manaLow = 0
     end
 
-    -- Check and apply Seal of Righteousness (always, even in combat)
-    if not buffed(SEAL_OF_RIGHTEOUSNESS, "player") and manaLow == 0 then
-        CastSpellByName(SEAL_OF_RIGHTEOUSNESS)
+    -- Check and apply Seal of Command (always, even in combat)
+    if not buffed(SEAL_OF_COMMAND, "player") and manaLow == 0 then
+        CastSpellByName(SEAL_OF_COMMAND)
         SpellTargetUnit("player")
+        sealOfCommandCastTime = GetTime() -- Record the time Seal of Command was cast
     end
 
     -- Check and apply Seal of Wisdom if mana is below 50%
@@ -160,23 +176,44 @@ local function CastAbilities()
     local maxMana = UnitManaMax("player")
     local manaPercentage = (currentMana / maxMana) * 100
 
-    -- Cast Judgement on cooldown
-    if IsSpellReady(JUDGEMENT) then
-        CastSpellByName(JUDGEMENT)
+    -- Check if Seal of Command is active and throttle Judgement
+    if buffed(SEAL_OF_COMMAND, "player") then
+        local currentTime = GetTime()
+        if currentTime - sealOfCommandCastTime < judgementThrottleDuration then
+            -- Do not cast Judgement if Seal of Command was cast within the last 20 seconds
+        else
+            -- Cast Judgement if the throttle duration has passed
+            if IsSpellReady(JUDGEMENT) then
+                CastSpellByName(JUDGEMENT)
+            end
+        end
     end
 
-    -- Cast Crusader Strike if mana is above 50%
+    -- Check if Seal of Wisdom is active and target does not have Judgement of Wisdom (debuff)
+    if buffed(SEAL_OF_WISDOM, "player") then
+        if not HasDebuff("target", {"Judgement of Wisdom"}) then
+            if IsSpellReady(JUDGEMENT) then
+                CastSpellByName(JUDGEMENT)
+            end
+        end
+    else
+        -- Cast Judgement on cooldown if Seal of Wisdom is not active
+        if IsSpellReady(JUDGEMENT) then
+            CastSpellByName(JUDGEMENT)
+        end
+    end
+
+    -- Cast Crusader Strike and Holy Strike in an alternating fashion
     if strikeWeave == 1 and IsSpellReady(CRUSADER_STRIKE) then
         CastSpellByName(CRUSADER_STRIKE)
         strikeWeave = 0
-    end
-
-    -- Cast Holy Strike if mana is below 50%
-    if strikeWeave == 0 and IsSpellReady(HOLY_STRIKE) then
+    elseif strikeWeave == 0 and IsSpellReady(HOLY_STRIKE) then
         CastSpellByName(HOLY_STRIKE)
         strikeWeave = 1
     end
 end
+
+-- end cast ability
 
 -- Function to check party health and cast emergency spells
 local function CheckPartyHealth()
@@ -294,11 +331,13 @@ end
 -- Register slash commands
 SLASH_CRUSADER1 = "/crusader"
 SlashCmdList["CRUSADER"] = function()
-    ApplyPlayerBuffs()
-    ApplyPartyBuffs()
-    CheckPartyHealth()
-    CastAbilities()
-    HealOutOfCombat() -- Added healing functionality
+    if not buffed("Bladestorm", "Player") then
+        ApplyPlayerBuffs()
+        ApplyPartyBuffs()
+        CheckPartyHealth()
+        CastAbilities()
+        HealOutOfCombat() -- Added healing functionality
+    end
 end
 
 SLASH_CRUSADERTHREAT1 = "/crusaderthreat"
