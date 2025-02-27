@@ -5,9 +5,15 @@ local addonName, addon = "Crusader", {}
 local HAMMER_OF_WRATH = "Hammer of Wrath" -- New spell
 local BLESSING_OF_MIGHT = "Blessing of Might"
 local BLESSING_OF_WISDOM = "Blessing of Wisdom"
+local BLESSING_OF_SANCTUARY = "Blessing of Sanctuary"
+local BLESSING_OF_SALVATION = "Blessing of Salvation"
 local DEVOTION_AURA = "Devotion Aura"
 local RIGHTEOUS_FURY = "Righteous Fury"
 local SEAL_OF_COMMAND = "Seal of Command"
+local HOLY_SHIELD = "Holy Shield"
+local BULWARK = "Bulwark of the Righteous"
+local SEAL_OF_RIGHTEOUSNESS = "Seal of Righteousness"
+local SEAL_OF_MODE = SEAL_OF_RIGHTEOUSNESS -- Default to Seal of Command
 local SEAL_OF_WISDOM = "Seal of Wisdom"
 local JUDGEMENT = "Judgement"
 local CRUSADER_STRIKE = "Crusader Strike"
@@ -20,6 +26,8 @@ local FREEDOM = "Hand of Freedom"
 local FLASH_OF_LIGHT = "Flash of Light"
 local strikeWeave = 0
 local threatmode = 1
+local hammertime = false
+local protmode = 1 -- 0 = normal, 1 = prot mode
 
 -- Throttle variables for Judgement
 local sealOfCommandCastTime = 0
@@ -54,23 +62,10 @@ local DEBUFFS_TO_FREEDOM = {
     -- Add more debuff names here as needed
 }
 
-
-
 -- Table to track combat events
 local combatEvents = {}
 local combatTimeout = 5 -- Time in seconds to consider an enemy out of combat
 local attackInterval = 2 -- Average attack interval in seconds
-
-local function CastHammerOfWrath()
-    local target = "target"
-    if UnitExists(target) and UnitCanAttack("player", target) then
-        local targetHealth = UnitHealth(target) / UnitHealthMax(target) * 100
-        if targetHealth <= 20 and IsSpellReady(HAMMER_OF_WRATH) then
-            DEFAULT_CHAT_FRAME:AddMessage("Casting Hammer of Wrath.")
-            CastSpellByName(HAMMER_OF_WRATH)
-        end
-    end
-end
 
 -- Function to handle combat events from chat messages
 local function HandleCombatChatMessage(event, message)
@@ -104,7 +99,6 @@ local function HandleCombatChatMessage(event, message)
     end
 end
 
-
 -- Function to update combat events and count active enemies
 local function UpdateCombatEvents()
     local currentTime = GetTime()
@@ -124,8 +118,6 @@ local function UpdateCombatEvents()
     return activeEnemies
 end
 
-
-
 -- Register chat combat events
 local frame = CreateFrame("Frame")
 DEFAULT_CHAT_FRAME:AddMessage("Frame created successfully.")
@@ -136,7 +128,6 @@ frame:SetScript("OnEvent", function()
 HandleCombatChatMessage(event, arg1)
 end
 )
-
 
 -- Function to find a spell ID by name
 local function FindSpellID(spellName)
@@ -213,11 +204,12 @@ local function ApplyPlayerBuffs()
     end
 
     -- Check and apply Seal of Command (always, even in combat)
-    if not buffed(SEAL_OF_COMMAND, "player") and manaLow == 0 then
-        CastSpellByName(SEAL_OF_COMMAND)
-        SpellTargetUnit("player")
-        sealOfCommandCastTime = GetTime() -- Record the time Seal of Command was cast
-    end
+-- Check and apply the current seal (SEAL_OF_MODE)
+if not buffed(SEAL_OF_MODE, "player") and manaLow == 0 then
+    CastSpellByName(SEAL_OF_MODE)
+    SpellTargetUnit("player")
+    sealOfCommandCastTime = GetTime() -- Record the time the seal was cast
+end
 
     -- Check and apply Seal of Wisdom if mana is below 50%
     if not buffed(SEAL_OF_WISDOM, "player") and manaLow == 1 then
@@ -227,10 +219,17 @@ local function ApplyPlayerBuffs()
 
     -- Only apply other buffs if out of combat
     if not UnitAffectingCombat("player") then
-        -- Check and apply Blessing of Might
-        if not buffed(BLESSING_OF_MIGHT, "player") then
-            CastSpellByName(BLESSING_OF_MIGHT)
-            SpellTargetUnit("player")
+        -- Check and apply Blessing of Might or Blessing of Sanctuary based on protmode
+        if protmode == 0 then
+            if not buffed(BLESSING_OF_MIGHT, "player") then
+                CastSpellByName(BLESSING_OF_MIGHT)
+                SpellTargetUnit("player")
+            end
+        else
+            if not buffed(BLESSING_OF_SANCTUARY, "player") then
+                CastSpellByName(BLESSING_OF_SANCTUARY)
+                SpellTargetUnit("player")
+            end
         end
 
         -- Check and apply Devotion Aura
@@ -257,18 +256,42 @@ local function ApplyPartyBuffs()
         for i = 1, 4 do
             local partyMember = "party" .. i
             if UnitExists(partyMember) and not UnitIsUnit(partyMember, "player") then
-                if IsManaUser(partyMember) then
-                    -- Apply Blessing of Wisdom to mana users
-                    if not buffed(BLESSING_OF_WISDOM, partyMember) then
-                        CastSpellByName(BLESSING_OF_WISDOM)
-                        SpellTargetUnit(partyMember)
+                if protmode == 0 then
+                    if IsManaUser(partyMember) then
+                        -- Apply Blessing of Wisdom to mana users
+                        if not buffed(BLESSING_OF_WISDOM, partyMember) then
+                            CastSpellByName(BLESSING_OF_WISDOM)
+                            SpellTargetUnit(partyMember)
+                        end
+                    else
+                        -- Apply Blessing of Might to non-mana users
+                        if not buffed(BLESSING_OF_MIGHT, partyMember) then
+                            CastSpellByName(BLESSING_OF_MIGHT)
+                            SpellTargetUnit(partyMember)
+                        end
                     end
                 else
-                    -- Apply Blessing of Might to non-mana users
-                    if not buffed(BLESSING_OF_MIGHT, partyMember) then
-                        CastSpellByName(BLESSING_OF_MIGHT)
+                    -- Apply Blessing of Salvation to all party members in prot mode
+                    if not buffed(BLESSING_OF_SALVATION, partyMember) then
+                        CastSpellByName(BLESSING_OF_SALVATION)
                         SpellTargetUnit(partyMember)
                     end
+                end
+            end
+        end
+    end
+end
+
+local function CastHammerOfWrath()
+    local activeEnemies = UpdateCombatEvents()
+    local target = "target"
+    if hammertime then
+        if activeEnemies <= 2 and IsSpellReady(HAMMER_OF_WRATH) then
+            if UnitExists(target) and UnitCanAttack("player", target) and not UnitIsDeadOrGhost(target) then
+                local targetHealth = UnitHealth(target) / UnitHealthMax(target) * 100
+                if targetHealth <= 20 and IsSpellReady(HAMMER_OF_WRATH) then
+                    --DEFAULT_CHAT_FRAME:AddMessage("Casting Hammer of Wrath.")
+                    CastSpellByName(HAMMER_OF_WRATH)
                 end
             end
         end
@@ -280,11 +303,23 @@ local function CastAbilities()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
     local manaPercentage = (currentMana / maxMana) * 100
+    local selfHealth = UnitHealth("player") / UnitHealthMax("player") * 100
 
     -- Check if target exists and is attackable
     local target = "target"
     if not UnitExists(target) or not UnitCanAttack("player", target) then
         return -- Exit if there is no target or the target is not attackable
+    end
+
+    if protmode == 1 then
+        if IsSpellReady(HOLY_SHIELD) then
+            CastSpellByName(HOLY_SHIELD)
+        end
+        if IsSpellReady(BULWARK) then
+            if selfHealth <= 30 then
+                CastSpellByName(BULWARK)
+            end
+        end
     end
 
     -- Check if the target is Undead and Exorcism is ready
@@ -294,11 +329,11 @@ local function CastAbilities()
         return -- Exit after casting Exorcism to prioritize it
     end
 
-    -- Check if Seal of Command is active and throttle Judgement
-    if buffed(SEAL_OF_COMMAND, "player") then
+    -- Check if the current seal (SEAL_OF_MODE) is active and throttle Judgement
+    if buffed(SEAL_OF_MODE, "player") then
         local currentTime = GetTime()
         if currentTime - sealOfCommandCastTime < judgementThrottleDuration then
-            -- Do not cast Judgement if Seal of Command was cast within the last 20 seconds
+            -- Do not cast Judgement if the seal was cast within the last 20 seconds
         else
             -- Cast Judgement if the throttle duration has passed
             if IsSpellReady(JUDGEMENT) then
@@ -316,9 +351,9 @@ local function CastAbilities()
         end
     else
         -- Cast Judgement on cooldown if Seal of Wisdom is not active
-        if IsSpellReady(JUDGEMENT) then
-            CastSpellByName(JUDGEMENT)
-        end
+        --if IsSpellReady(JUDGEMENT) then
+            --CastSpellByName(JUDGEMENT)
+        --end
     end
 
     -- Cast Crusader Strike and Holy Strike in an alternating fashion
@@ -329,6 +364,8 @@ local function CastAbilities()
         CastSpellByName(HOLY_STRIKE)
         strikeWeave = 1
     end
+
+
 
     -- Cast Consecration if in combat with 3 or more enemies
     CastConsecrationIfNeeded()
@@ -448,8 +485,16 @@ local function ToggleThreatMode()
     end
 end
 
-
-
+local function ToggleProtMode()
+    if protmode == 0 then
+        protmode = 1
+        threatmode = 1
+        SEAL_OF_MODE = SEAL_OF_RIGHTEOUSNESS -- Use Seal of Righteousness in protection mode
+    else
+        protmode = 0
+        SEAL_OF_MODE = SEAL_OF_COMMAND -- Use Seal of Command in normal mode
+    end
+end
 
 -- Register slash commands
 SLASH_CRUSADER1 = "/crusader"
@@ -466,4 +511,9 @@ end
 SLASH_CRUSADERTHREAT1 = "/crusaderthreat"
 SlashCmdList["CRUSADERTHREAT"] = function()
     ToggleThreatMode()
+end
+
+SLASH_CRUSADERPROT1 = "/crusader-prot"
+SlashCmdList["CRUSADERPROT"] = function()
+    ToggleProtMode()
 end
