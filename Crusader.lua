@@ -2,6 +2,7 @@
 local addonName, addon = "Crusader", {}
 
 -- Spell Names
+local HAMMER_OF_WRATH = "Hammer of Wrath" -- New spell
 local BLESSING_OF_MIGHT = "Blessing of Might"
 local BLESSING_OF_WISDOM = "Blessing of Wisdom"
 local DEVOTION_AURA = "Devotion Aura"
@@ -60,6 +61,17 @@ local combatEvents = {}
 local combatTimeout = 5 -- Time in seconds to consider an enemy out of combat
 local attackInterval = 2 -- Average attack interval in seconds
 
+local function CastHammerOfWrath()
+    local target = "target"
+    if UnitExists(target) and UnitCanAttack("player", target) then
+        local targetHealth = UnitHealth(target) / UnitHealthMax(target) * 100
+        if targetHealth <= 20 and IsSpellReady(HAMMER_OF_WRATH) then
+            DEFAULT_CHAT_FRAME:AddMessage("Casting Hammer of Wrath.")
+            CastSpellByName(HAMMER_OF_WRATH)
+        end
+    end
+end
+
 -- Function to handle combat events from chat messages
 local function HandleCombatChatMessage(event, message)
     -- Track all incoming attacks (enemies attacking you)
@@ -71,7 +83,7 @@ local function HandleCombatChatMessage(event, message)
                           strmatch(message, "(.+) misses you") or
                           strmatch(message, "(.+) attacks. You parry")
         if enemyName then
-            DEFAULT_CHAT_FRAME:AddMessage("Enemy attacked the player: " .. enemyName)
+            --DEFAULT_CHAT_FRAME:AddMessage("Enemy attacked the player: " .. enemyName)
             if not combatEvents[enemyName] then
                 -- Initialize the enemy's data if it doesn't exist
                 combatEvents[enemyName] = { count = 1, lastAttackTime = GetTime() }
@@ -108,7 +120,7 @@ local function UpdateCombatEvents()
         end
     end
 
-    DEFAULT_CHAT_FRAME:AddMessage("Active enemies: " .. activeEnemies)
+   -- DEFAULT_CHAT_FRAME:AddMessage("Active enemies: " .. activeEnemies)
     return activeEnemies
 end
 
@@ -151,7 +163,7 @@ end
 local function CastConsecrationIfNeeded()
     local activeEnemies = UpdateCombatEvents()
     if activeEnemies >= 3 and IsSpellReady(CONSECRATION) then
-        DEFAULT_CHAT_FRAME:AddMessage("Casting Consecration.")
+        --DEFAULT_CHAT_FRAME:AddMessage("Casting Consecration.")
         CastSpellByName(CONSECRATION)
     end
 end
@@ -320,6 +332,9 @@ local function CastAbilities()
 
     -- Cast Consecration if in combat with 3 or more enemies
     CastConsecrationIfNeeded()
+
+    -- Cast Hammer of Wrath if the target has 20% or less health
+    CastHammerOfWrath()
 end
 
 -- Function to check party health and cast emergency spells
