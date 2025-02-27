@@ -16,13 +16,13 @@ local HAND_OF_PROTECTION = "Hand of Protection"
 local LAY_ON_HANDS = "Lay on Hands(Rank 2)"
 local DISPEL = "Cleanse"
 local FREEDOM = "Hand of Freedom"
-local FLASH_OF_LIGHT = "Flash of Light" -- New healing spell
+local FLASH_OF_LIGHT = "Flash of Light"
 local strikeWeave = 0
 local threatmode = 1
 
 -- Throttle variables for Judgement
 local sealOfCommandCastTime = 0
-local judgementThrottleDuration = 20 -- 20 seconds throttle
+local judgementThrottleDuration = 25 -- 20 seconds throttle
 
 -- Debuff Lists
 local DEBUFFS_TO_DISPEL = {
@@ -43,6 +43,7 @@ local DEBUFFS_TO_DISPEL = {
     "Nature_Sleep",
     "StrangleVines",
     "Slow",
+    "AbominationExplosion",
     -- Add more debuff names here as needed
 }
 
@@ -51,6 +52,79 @@ local DEBUFFS_TO_FREEDOM = {
     "ShockWave",
     -- Add more debuff names here as needed
 }
+
+
+
+-- Table to track combat events
+local combatEvents = {}
+local combatTimeout = 5 -- Time in seconds to consider an enemy out of combat
+local attackInterval = 2 -- Average attack interval in seconds
+
+-- Function to handle combat events from chat messages
+local function HandleCombatChatMessage(event, message)
+    -- Track all incoming attacks (enemies attacking you)
+    if event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS" or
+       event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_MISSES" or
+       event == "CHAT_MSG_COMBAT_CREATURE_VS_SELF_CRITS" then
+        local enemyName = strmatch(message, "(.+) hits you") or
+                          strmatch(message, "(.+) crits you") or
+                          strmatch(message, "(.+) misses you") or
+                          strmatch(message, "(.+) attacks. You parry")
+        if enemyName then
+            DEFAULT_CHAT_FRAME:AddMessage("Enemy attacked the player: " .. enemyName)
+            if not combatEvents[enemyName] then
+                -- Initialize the enemy's data if it doesn't exist
+                combatEvents[enemyName] = { count = 1, lastAttackTime = GetTime() }
+            else
+                local currentTime = GetTime()
+                local timeSinceLastAttack = currentTime - combatEvents[enemyName].lastAttackTime
+
+                -- If the time since the last attack is less than the attack interval, increment the count
+                if timeSinceLastAttack < attackInterval then
+                    combatEvents[enemyName].count = combatEvents[enemyName].count + 1
+                else
+                    -- Reset the count if the attack is outside the attack interval
+                    combatEvents[enemyName].count = 1
+                end
+                combatEvents[enemyName].lastAttackTime = currentTime
+            end
+        end
+    end
+end
+
+
+-- Function to update combat events and count active enemies
+local function UpdateCombatEvents()
+    local currentTime = GetTime()
+    local activeEnemies = 0
+
+    for enemyName, data in pairs(combatEvents) do
+        if currentTime - data.lastAttackTime > combatTimeout then
+            -- Remove the enemy if they haven't attacked within the timeout
+            combatEvents[enemyName] = nil
+        else
+            -- Add the inferred count for this enemy name
+            activeEnemies = activeEnemies + data.count
+        end
+    end
+
+    DEFAULT_CHAT_FRAME:AddMessage("Active enemies: " .. activeEnemies)
+    return activeEnemies
+end
+
+
+
+-- Register chat combat events
+local frame = CreateFrame("Frame")
+DEFAULT_CHAT_FRAME:AddMessage("Frame created successfully.")
+frame:RegisterEvent("CHAT_MSG_COMBAT_SELF_HITS")
+frame:RegisterEvent("CHAT_MSG_COMBAT_CREATURE_VS_SELF_HITS")
+DEFAULT_CHAT_FRAME:AddMessage("Events registered successfully.")
+frame:SetScript("OnEvent", function()
+HandleCombatChatMessage(event, arg1)
+end
+)
+
 
 -- Function to find a spell ID by name
 local function FindSpellID(spellName)
@@ -71,6 +145,15 @@ local function IsSpellReady(spellName)
         return start == 0 and duration <= 1.5 -- Cooldown is ready
     end
     return false
+end
+
+-- Function to cast Consecration if in combat with 3 or more enemies
+local function CastConsecrationIfNeeded()
+    local activeEnemies = UpdateCombatEvents()
+    if activeEnemies >= 3 and IsSpellReady(CONSECRATION) then
+        DEFAULT_CHAT_FRAME:AddMessage("Casting Consecration.")
+        CastSpellByName(CONSECRATION)
+    end
 end
 
 -- Function to check if a unit is a mana user
@@ -181,7 +264,6 @@ local function ApplyPartyBuffs()
 end
 
 -- Function to check and cast abilities
--- Function to check and cast abilities
 local function CastAbilities()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
@@ -235,9 +317,10 @@ local function CastAbilities()
         CastSpellByName(HOLY_STRIKE)
         strikeWeave = 1
     end
-end
 
--- end cast ability
+    -- Cast Consecration if in combat with 3 or more enemies
+    CastConsecrationIfNeeded()
+end
 
 -- Function to check party health and cast emergency spells
 local function CheckPartyHealth()
@@ -314,7 +397,7 @@ local function CheckPartyHealth()
     end
 end
 
--- New Function: Heal myself and party members when out of combat and health is below 90%
+-- Function to heal myself and party members when out of combat and health is below 90%
 local function HealOutOfCombat()
     -- Only heal if out of combat
     if not UnitAffectingCombat("player") then
@@ -345,12 +428,13 @@ end
 local function ToggleThreatMode()
     if threatmode == 0 then
         threatmode = 1
-        print("Crusader: Threat mode enabled.")
     else
         threatmode = 0
-        print("Crusader: Threat mode disabled.")
     end
 end
+
+
+
 
 -- Register slash commands
 SLASH_CRUSADER1 = "/crusader"
@@ -360,7 +444,7 @@ SlashCmdList["CRUSADER"] = function()
         ApplyPartyBuffs()
         CheckPartyHealth()
         CastAbilities()
-        HealOutOfCombat() -- Added healing functionality
+        HealOutOfCombat()
     end
 end
 
