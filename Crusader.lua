@@ -53,6 +53,7 @@ local DEBUFFS_TO_DISPEL = {
     "StrangleVines",
     "Slow",
     "AbominationExplosion",
+    "Shadow_Teleport",
     -- Add more debuff names here as needed
 }
 
@@ -192,6 +193,7 @@ local function HasBuff(unit, buffName)
 end
 
 -- Function to apply buffs to the player
+-- Function to apply buffs to the player
 local function ApplyPlayerBuffs()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
@@ -201,20 +203,6 @@ local function ApplyPlayerBuffs()
     end
     if manaPercentage >= 95 then
         manaLow = 0
-    end
-
-    -- Check and apply Seal of Command (always, even in combat)
--- Check and apply the current seal (SEAL_OF_MODE)
-if not buffed(SEAL_OF_MODE, "player") and manaLow == 0 then
-    CastSpellByName(SEAL_OF_MODE)
-    SpellTargetUnit("player")
-    sealOfCommandCastTime = GetTime() -- Record the time the seal was cast
-end
-
-    -- Check and apply Seal of Wisdom if mana is below 50%
-    if not buffed(SEAL_OF_WISDOM, "player") and manaLow == 1 then
-        CastSpellByName(SEAL_OF_WISDOM)
-        SpellTargetUnit("player")
     end
 
     -- Only apply other buffs if out of combat
@@ -244,8 +232,20 @@ end
                 CastSpellByName(RIGHTEOUS_FURY)
                 SpellTargetUnit("player")
             end
-        else
         end
+    end
+
+    -- Check and apply Seal of Command (always, even in combat)
+    if not buffed(SEAL_OF_MODE, "player") and manaLow == 0 then
+        CastSpellByName(SEAL_OF_MODE)
+        SpellTargetUnit("player")
+        sealOfCommandCastTime = GetTime() -- Record the time the seal was cast
+    end
+
+    -- Check and apply Seal of Wisdom if mana is below 50%
+    if not buffed(SEAL_OF_WISDOM, "player") and manaLow == 1 then
+        CastSpellByName(SEAL_OF_WISDOM)
+        SpellTargetUnit("player")
     end
 end
 
@@ -298,6 +298,23 @@ local function CastHammerOfWrath()
     end
 end
 
+local function CheckTargetsTarget()
+    local target = "target"
+    if UnitExists(target) and UnitCanAttack("player", target) and not UnitIsDeadOrGhost(target) then
+        local targetsTarget = target .. "target" -- Get your target's target
+        if UnitExists(targetsTarget) then
+            -- Check if your target is not targeting you
+            if not UnitIsUnit(targetsTarget, "player") then
+                -- Check if Hand of Reckoning is ready
+                if IsSpellReady("Hand of Reckoning") then
+             --       DEFAULT_CHAT_FRAME:AddMessage("Casting Hand of Reckoning to taunt the target.")
+                    CastSpellByName("Hand of Reckoning")
+                end
+            end
+        end
+    end
+end
+
 -- Function to check and cast abilities
 local function CastAbilities()
     local currentMana = UnitMana("player")
@@ -311,16 +328,7 @@ local function CastAbilities()
         return -- Exit if there is no target or the target is not attackable
     end
 
-    if protmode == 1 then
-        if IsSpellReady(HOLY_SHIELD) then
-            CastSpellByName(HOLY_SHIELD)
-        end
-        if IsSpellReady(BULWARK) then
-            if selfHealth <= 30 then
-                CastSpellByName(BULWARK)
-            end
-        end
-    end
+
 
     -- Check if the target is Undead and Exorcism is ready
     local creatureType = UnitCreatureType(target)
@@ -365,7 +373,19 @@ local function CastAbilities()
         strikeWeave = 1
     end
 
-
+    -- Cast Holy Shield only if in combat
+    if protmode == 1 and UnitAffectingCombat("player") then
+        if buffed("Redoubt", "player") and ((buffed(SEAL_OF_WISDOM, "player") and buffed("Judgement of Wisdom", target)) or buffed(SEAL_OF_RIGHTEOUSNESS, "player")) then
+            if IsSpellReady(HOLY_SHIELD) then
+             CastSpellByName(HOLY_SHIELD)
+            end
+        end
+        if IsSpellReady(BULWARK) then
+            if selfHealth <= 30 then
+                CastSpellByName(BULWARK)
+            end
+        end
+    end
 
     -- Cast Consecration if in combat with 3 or more enemies
     CastConsecrationIfNeeded()
@@ -500,11 +520,13 @@ end
 SLASH_CRUSADER1 = "/crusader"
 SlashCmdList["CRUSADER"] = function()
     if not buffed("Bladestorm", "Player") then
-        ApplyPlayerBuffs()
-        ApplyPartyBuffs()
         CheckPartyHealth()
+        ApplyPartyBuffs()
+        ApplyPlayerBuffs()
         CastAbilities()
         HealOutOfCombat()
+        CheckTargetsTarget() -- Check your target's target and cast Hand of Reckoning if needed
+
     end
 end
 
