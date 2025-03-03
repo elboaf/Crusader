@@ -54,6 +54,9 @@ local DEBUFFS_TO_DISPEL = {
     "Slow",
     "AbominationExplosion",
     "Shadow_Teleport",
+    "Shaman_Hex",
+    "SummonImp",
+    "Taunt",
     -- Add more debuff names here as needed
 }
 
@@ -198,7 +201,7 @@ local function ApplyPlayerBuffs()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
     local manaPercentage = (currentMana / maxMana) * 100
-    if manaPercentage < 40 then
+    if manaPercentage < 75 then
         manaLow = 1
     end
     if manaPercentage >= 95 then
@@ -206,7 +209,7 @@ local function ApplyPlayerBuffs()
     end
 
     -- Only apply other buffs if out of combat
-    if not UnitAffectingCombat("player") then
+    if not UnitAffectingCombat("player") or manaPercentage > 85 then
         -- Check and apply Blessing of Might or Blessing of Sanctuary based on protmode
         if protmode == 0 then
             if not buffed(BLESSING_OF_MIGHT, "player") then
