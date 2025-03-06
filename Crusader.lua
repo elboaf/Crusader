@@ -63,6 +63,7 @@ local DEBUFFS_TO_DISPEL = {
     "Taunt",
     "AnimateDead",
     "Shadow_Cripple",
+    "FrostArmor",
     -- Add more debuff names here as needed
 }
 
