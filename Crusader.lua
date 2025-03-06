@@ -1,5 +1,9 @@
 -- Addon Name
 local addonName, addon = "Crusader", {}
+local inCombat = false
+
+local lastCleanseTime = 0
+local cleanseCooldown = 5 -- Cooldown duration in seconds
 
 -- Spell Names
 local HAMMER_OF_WRATH = "Hammer of Wrath" -- New spell
@@ -57,12 +61,15 @@ local DEBUFFS_TO_DISPEL = {
     "Shaman_Hex",
     "SummonImp",
     "Taunt",
+    "AnimateDead",
+    "Shadow_Cripple",
     -- Add more debuff names here as needed
 }
 
 local DEBUFFS_TO_FREEDOM = {
     "snare",
     "ShockWave",
+    "CriticalStrike",
     -- Add more debuff names here as needed
 }
 
@@ -132,6 +139,9 @@ frame:SetScript("OnEvent", function()
 HandleCombatChatMessage(event, arg1)
 end
 )
+
+frame:RegisterEvent("PLAYER_REGEN_DISABLED") -- Player enters combat
+frame:RegisterEvent("PLAYER_REGEN_ENABLED")  -- Player exits combat
 
 -- Function to find a spell ID by name
 local function FindSpellID(spellName)
@@ -259,7 +269,7 @@ local function ApplyPartyBuffs()
         for i = 1, 4 do
             local partyMember = "party" .. i
             if UnitExists(partyMember) and not UnitIsUnit(partyMember, "player") then
-                if protmode == 0 then
+                if protmode == 1 then
                     if IsManaUser(partyMember) then
                         -- Apply Blessing of Wisdom to mana users
                         if not buffed(BLESSING_OF_WISDOM, partyMember) then
@@ -397,11 +407,11 @@ local function CastAbilities()
     CastHammerOfWrath()
 end
 
--- Function to check party health and cast emergency spells
 local function CheckPartyHealth()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
     local manaPercentage = (currentMana / maxMana) * 100
+    local currentTime = GetTime()
 
     -- Check for snares and cast Hand of Freedom first (highest priority)
     if HasDebuff("player", DEBUFFS_TO_FREEDOM) and manaPercentage > 5 then
@@ -430,11 +440,14 @@ local function CheckPartyHealth()
         return
     end
 
-    -- Check for other debuffs and cast Purify if needed
+    -- Check for other debuffs and cast Purify if needed, but only if the cooldown has passed
     if HasDebuff("player", DEBUFFS_TO_DISPEL) and manaPercentage > 5 then
-        CastSpellByName(DISPEL)
-        SpellTargetUnit("player")
-        return
+        if currentTime - lastCleanseTime >= cleanseCooldown then
+            CastSpellByName(DISPEL)
+            SpellTargetUnit("player")
+            lastCleanseTime = currentTime -- Update the last cleanse time
+            return
+        end
     end
 
     -- Check party members for other debuffs and low health
@@ -455,11 +468,14 @@ local function CheckPartyHealth()
                 CastSpellByName(CONSECRATION)
             end
 
-            -- Check for other debuffs and cast Purify if needed
+            -- Check for other debuffs and cast Purify if needed, but only if the cooldown has passed
             if HasDebuff(partyMember, DEBUFFS_TO_DISPEL) and manaPercentage > 5 then
-                CastSpellByName(DISPEL)
-                SpellTargetUnit(partyMember)
-                return
+                if currentTime - lastCleanseTime >= cleanseCooldown then
+                    CastSpellByName(DISPEL)
+                    SpellTargetUnit(partyMember)
+                    lastCleanseTime = currentTime -- Update the last cleanse time
+                    return
+                end
             end
 
             -- Cast Hand of Protection if health is below 20% (excluding self)
