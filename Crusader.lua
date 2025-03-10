@@ -24,7 +24,7 @@ local CRUSADER_STRIKE = "Crusader Strike"
 local CONSECRATION = "Consecration"
 local HOLY_STRIKE = "Holy Strike"
 local HAND_OF_PROTECTION = "Hand of Protection"
-local LAY_ON_HANDS = "Lay on Hands(Rank 2)"
+local LAY_ON_HANDS = "Lay on Hands(Rank 3)"
 local DISPEL = "Cleanse"
 local FREEDOM = "Hand of Freedom"
 local FLASH_OF_LIGHT = "Flash of Light"
@@ -32,6 +32,8 @@ local strikeWeave = 0
 local threatmode = 1
 local hammertime = false
 local protmode = 1 -- 0 = normal, 1 = prot mode
+local salvationMode = 0 -- 0 = mana-specific mode, 1 = salvation mode
+local blessingsEnabled = true -- Default to true, meaning blessings are enabled
 
 -- Throttle variables for Judgement
 local sealOfCommandCastTime = 0
@@ -64,7 +66,8 @@ local DEBUFFS_TO_DISPEL = {
     "AnimateDead",
     "Shadow_Cripple",
     "FrostArmor",
-    -- Add more debuff names here as needed
+    "Shadow_Possession",
+    -- Add more debuff names here as ne,eeded
 }
 
 local DEBUFFS_TO_FREEDOM = {
@@ -73,6 +76,22 @@ local DEBUFFS_TO_FREEDOM = {
     "CriticalStrike",
     -- Add more debuff names here as needed
 }
+
+-- Table to map spell texture names to actual spell names
+local SpellTextureToName = {
+    ["RighteousnessAura"] = "Seal of Wisdom",          -- Partial texture path for Seal of Wisdom
+    ["LightningShield"] = "Blessing of Sanctuary",     -- Partial texture path for Blessing of Sanctuary
+    ["DevotionAura"] = "Devotion Aura",                -- Partial texture path for Devotion Aura
+    ["SealOfFury"] = "Righteous Fury",                 -- Partial texture path for Righteous Fury
+    ["ThunderBolt"] = "Seal of Righteousness",         -- Partial texture path for Seal of Righteousness
+    ["SealOfSalvation"] = "Blessing of Salvation",     -- Partial texture path for Blessing of Salvation
+    ["FistOfJustice"] = "Blessing of Might",           -- Partial texture path for Blessing of Might
+    ["BlessingOfProtection"] = "Holy Shield",          -- Partial texture path for Holy Shield
+    ["SealOfWisdom"] = "Blessing of Wisdom",
+    -- Add more mappings here as needed
+}
+
+
 
 -- Table to track combat events
 local combatEvents = {}
@@ -197,17 +216,20 @@ end
 
 -- Function to check if a unit has a specific buff
 local function HasBuff(unit, buffName)
-    for i = 1, 16 do
-        local name = UnitBuff(unit, i)
-        if name and strfind(name, buffName) then
-            return true
+    for i = 1, 32 do
+        local texture = UnitBuff(unit, i)
+        if texture then
+            -- Look up the spell name using the texture name
+            for texturePath, spellName in pairs(SpellTextureToName) do
+                if strfind(texture, texturePath) and spellName == buffName then
+                    return true
+                end
+            end
         end
     end
     return false
 end
 
--- Function to apply buffs to the player
--- Function to apply buffs to the player
 local function ApplyPlayerBuffs()
     local currentMana = UnitMana("player")
     local maxMana = UnitManaMax("player")
@@ -219,76 +241,85 @@ local function ApplyPlayerBuffs()
         manaLow = 0
     end
 
-    -- Only apply other buffs if out of combat
-    if not UnitAffectingCombat("player") or manaPercentage > 85 then
-        -- Check and apply Blessing of Might or Blessing of Sanctuary based on protmode
-        if protmode == 0 then
-            if not buffed(BLESSING_OF_MIGHT, "player") then
-                CastSpellByName(BLESSING_OF_MIGHT)
-                SpellTargetUnit("player")
-            end
-        else
-            if not buffed(BLESSING_OF_SANCTUARY, "player") then
-                CastSpellByName(BLESSING_OF_SANCTUARY)
-                SpellTargetUnit("player")
-            end
-        end
-
-        -- Check and apply Devotion Aura
-        if not buffed(DEVOTION_AURA, "player") then
-            CastSpellByName(DEVOTION_AURA)
-            SpellTargetUnit("player")
-        end
-
-        -- Check and apply Righteous Fury
-        if threatmode == 1 then
-            if not buffed(RIGHTEOUS_FURY, "player") then
-                CastSpellByName(RIGHTEOUS_FURY)
-                SpellTargetUnit("player")
-            end
-        end
-    end
-
+    -- Apply seals regardless of whether blessings are enabled
     -- Check and apply Seal of Command (always, even in combat)
-    if not buffed(SEAL_OF_MODE, "player") and manaLow == 0 then
+    if not HasBuff("player", SEAL_OF_MODE) and manaLow == 0 then
         CastSpellByName(SEAL_OF_MODE)
         SpellTargetUnit("player")
         sealOfCommandCastTime = GetTime() -- Record the time the seal was cast
     end
 
     -- Check and apply Seal of Wisdom if mana is below 50%
-    if not buffed(SEAL_OF_WISDOM, "player") and manaLow == 1 then
+    if not HasBuff("player", SEAL_OF_WISDOM) and manaLow == 1 then
         CastSpellByName(SEAL_OF_WISDOM)
         SpellTargetUnit("player")
     end
+
+    -- Only apply blessings if blessings are enabled
+    if not blessingsEnabled then
+        return -- Exit if blessings are disabled
+    end
+
+    -- Only apply other buffs if out of combat
+    if not UnitAffectingCombat("player") or manaPercentage > 85 then
+        -- Check and apply Blessing of Might or Blessing of Sanctuary based on protmode
+        if protmode == 0 then
+            if not HasBuff("player", BLESSING_OF_MIGHT) then
+                CastSpellByName(BLESSING_OF_MIGHT)
+                SpellTargetUnit("player")
+            end
+        else
+            if not HasBuff("player", BLESSING_OF_SANCTUARY) then
+                CastSpellByName(BLESSING_OF_SANCTUARY)
+                SpellTargetUnit("player")
+            end
+        end
+
+        -- Check and apply Devotion Aura
+        if not HasBuff("player", DEVOTION_AURA) then
+            CastSpellByName(DEVOTION_AURA)
+            SpellTargetUnit("player")
+        end
+
+        -- Check and apply Righteous Fury
+        if threatmode == 1 then
+            if not HasBuff("player", RIGHTEOUS_FURY) then
+                CastSpellByName(RIGHTEOUS_FURY)
+                SpellTargetUnit("player")
+            end
+        end
+    end
 end
 
--- Function to apply buffs to party members
 local function ApplyPartyBuffs()
+    if not blessingsEnabled then
+        return -- Exit if blessings are disabled
+    end
+
     -- Only apply buffs if out of combat
     if not UnitAffectingCombat("player") then
         for i = 1, 4 do
             local partyMember = "party" .. i
             if UnitExists(partyMember) and not UnitIsUnit(partyMember, "player") then
-                if protmode == 1 then
+                if salvationMode == 1 then
+                    -- Apply Blessing of Salvation to all party members in salvation mode
+                    if not HasBuff(partyMember, BLESSING_OF_SALVATION) then
+                        CastSpellByName(BLESSING_OF_SALVATION)
+                        SpellTargetUnit(partyMember)
+                    end
+                else
                     if IsManaUser(partyMember) then
                         -- Apply Blessing of Wisdom to mana users
-                        if not buffed(BLESSING_OF_WISDOM, partyMember) then
+                        if not HasBuff(partyMember, BLESSING_OF_WISDOM) then
                             CastSpellByName(BLESSING_OF_WISDOM)
                             SpellTargetUnit(partyMember)
                         end
                     else
                         -- Apply Blessing of Might to non-mana users
-                        if not buffed(BLESSING_OF_MIGHT, partyMember) then
+                        if not HasBuff(partyMember, BLESSING_OF_MIGHT) then
                             CastSpellByName(BLESSING_OF_MIGHT)
                             SpellTargetUnit(partyMember)
                         end
-                    end
-                else
-                    -- Apply Blessing of Salvation to all party members in prot mode
-                    if not buffed(BLESSING_OF_SALVATION, partyMember) then
-                        CastSpellByName(BLESSING_OF_SALVATION)
-                        SpellTargetUnit(partyMember)
                     end
                 end
             end
@@ -342,8 +373,6 @@ local function CastAbilities()
         return -- Exit if there is no target or the target is not attackable
     end
 
-
-
     -- Check if the target is Undead and Exorcism is ready
     local creatureType = UnitCreatureType(target)
     if (creatureType == "Undead" or creatureType == "Demon") and IsSpellReady("Exorcism") then
@@ -352,7 +381,7 @@ local function CastAbilities()
     end
 
     -- Check if the current seal (SEAL_OF_MODE) is active and throttle Judgement
-    if buffed(SEAL_OF_MODE, "player") then
+    if HasBuff("player", SEAL_OF_MODE) then
         local currentTime = GetTime()
         if currentTime - sealOfCommandCastTime < judgementThrottleDuration then
             -- Do not cast Judgement if the seal was cast within the last 20 seconds
@@ -365,7 +394,7 @@ local function CastAbilities()
     end
 
     -- Check if Seal of Wisdom is active and target does not have Judgement of Wisdom (debuff)
-    if buffed(SEAL_OF_WISDOM, "player") then
+    if HasBuff("player", SEAL_OF_WISDOM) then
         if not buffed("Judgement of Wisdom", target) then
             if IsSpellReady(JUDGEMENT) then
                 CastSpellByName(JUDGEMENT)
@@ -389,7 +418,7 @@ local function CastAbilities()
 
     -- Cast Holy Shield only if in combat
     if protmode == 1 and UnitAffectingCombat("player") then
-        if buffed("Redoubt", "player") and ((buffed(SEAL_OF_WISDOM, "player") and buffed("Judgement of Wisdom", target)) or buffed(SEAL_OF_RIGHTEOUSNESS, "player")) then
+        if ((HasBuff("player", SEAL_OF_WISDOM) and buffed("Judgement of Wisdom", target)) or HasBuff("player", SEAL_OF_RIGHTEOUSNESS)) then
             if IsSpellReady(HOLY_SHIELD) then
              CastSpellByName(HOLY_SHIELD)
             end
@@ -536,17 +565,25 @@ local function ToggleProtMode()
     end
 end
 
+-- Function to toggle salvation mode
+local function ToggleSalvationMode()
+    if salvationMode == 0 then
+        salvationMode = 1
+    else
+        salvationMode = 0
+    end
+end
+
 -- Register slash commands
 SLASH_CRUSADER1 = "/crusader"
 SlashCmdList["CRUSADER"] = function()
-    if not buffed("Bladestorm", "Player") then
+    if not HasBuff("player", "Bladestorm") then
         CheckPartyHealth()
         ApplyPartyBuffs()
         ApplyPlayerBuffs()
         CastAbilities()
         HealOutOfCombat()
         CheckTargetsTarget() -- Check your target's target and cast Hand of Reckoning if needed
-
     end
 end
 
@@ -558,4 +595,25 @@ end
 SLASH_CRUSADERPROT1 = "/crusader-prot"
 SlashCmdList["CRUSADERPROT"] = function()
     ToggleProtMode()
+end
+
+SLASH_CRUSADERSALV1 = "/crusader-salv"
+SlashCmdList["CRUSADERSALV"] = function()
+    ToggleSalvationMode()
+end
+
+-- Function to toggle blessings
+local function ToggleBlessings()
+    blessingsEnabled = not blessingsEnabled
+    if blessingsEnabled then
+        DEFAULT_CHAT_FRAME:AddMessage("Blessings are now enabled.")
+    else
+        DEFAULT_CHAT_FRAME:AddMessage("Blessings are now disabled.")
+    end
+end
+
+-- Register slash command to toggle blessings
+SLASH_CRUSADERBLESSINGS1 = "/crusader-blessings"
+SlashCmdList["CRUSADERBLESSINGS"] = function()
+    ToggleBlessings()
 end
