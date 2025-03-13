@@ -4,6 +4,12 @@ local inCombat = false
 
 local lastCleanseTime = 0
 local cleanseCooldown = 5 -- Cooldown duration in seconds
+local kingsMode = 0 -- 0 = off, 1 = kings mode
+local salvationMode = 0 -- 0 = mana-specific mode, 1 = salvation mode
+local sancMode = 0 -- 0 = off, 1 = on
+local lightMode = 0 -- 0 = off, 1 = on
+
+
 
 -- Spell Names
 local HAMMER_OF_WRATH = "Hammer of Wrath" -- New spell
@@ -11,6 +17,7 @@ local BLESSING_OF_MIGHT = "Blessing of Might"
 local BLESSING_OF_WISDOM = "Blessing of Wisdom"
 local BLESSING_OF_SANCTUARY = "Blessing of Sanctuary"
 local BLESSING_OF_SALVATION = "Blessing of Salvation"
+local BLESSING_OF_KINGS = "Blessing of Kings"
 local DEVOTION_AURA = "Devotion Aura"
 local RIGHTEOUS_FURY = "Righteous Fury"
 local SEAL_OF_COMMAND = "Seal of Command"
@@ -19,6 +26,7 @@ local BULWARK = "Bulwark of the Righteous"
 local SEAL_OF_RIGHTEOUSNESS = "Seal of Righteousness"
 local SEAL_OF_MODE = SEAL_OF_RIGHTEOUSNESS -- Default to Seal of Command
 local SEAL_OF_WISDOM = "Seal of Wisdom"
+local SEAL_OF_LIGHT = "Seal of Light"
 local JUDGEMENT = "Judgement"
 local CRUSADER_STRIKE = "Crusader Strike"
 local CONSECRATION = "Consecration"
@@ -32,7 +40,6 @@ local strikeWeave = 0
 local threatmode = 1
 local hammertime = false
 local protmode = 1 -- 0 = normal, 1 = prot mode
-local salvationMode = 0 -- 0 = mana-specific mode, 1 = salvation mode
 local blessingsEnabled = true -- Default to true, meaning blessings are enabled
 
 -- Throttle variables for Judgement
@@ -67,6 +74,7 @@ local DEBUFFS_TO_DISPEL = {
     "Shadow_Cripple",
     "FrostArmor",
     "Shadow_Possession",
+    "SummonWaterElemental",
     -- Add more debuff names here as ne,eeded
 }
 
@@ -77,18 +85,40 @@ local DEBUFFS_TO_FREEDOM = {
     -- Add more debuff names here as needed
 }
 
--- Table to map spell texture names to actual spell names
 local SpellTextureToName = {
     ["RighteousnessAura"] = "Seal of Wisdom",          -- Partial texture path for Seal of Wisdom
     ["LightningShield"] = "Blessing of Sanctuary",     -- Partial texture path for Blessing of Sanctuary
     ["DevotionAura"] = "Devotion Aura",                -- Partial texture path for Devotion Aura
     ["SealOfFury"] = "Righteous Fury",                 -- Partial texture path for Righteous Fury
     ["ThunderBolt"] = "Seal of Righteousness",         -- Partial texture path for Seal of Righteousness
+    ["HealingAura"] = "Seal of Light",         -- Partial texture path for Seal of Righteousness
     ["SealOfSalvation"] = "Blessing of Salvation",     -- Partial texture path for Blessing of Salvation
     ["FistOfJustice"] = "Blessing of Might",           -- Partial texture path for Blessing of Might
     ["BlessingOfProtection"] = "Holy Shield",          -- Partial texture path for Holy Shield
     ["SealOfWisdom"] = "Blessing of Wisdom",
+    ["Magic_MageArmor"] = "Blessing of Kings",
     -- Add more mappings here as needed
+
+    -- Greater Blessings
+    ["GreaterBlessingofSanctuary"] = "Greater Blessing of Sanctuary",  -- Partial texture path for Greater Blessing of Sanctuary
+    ["GreaterBlessingofSalvation"] = "Greater Blessing of Salvation",  -- Partial texture path for Greater Blessing of Salvation
+    ["Holy_GreaterBlessingofKings"] = "Greater Blessing of Might",        -- Partial texture path for Greater Blessing of Might
+    ["GreaterBlessingofWisdom"] = "Greater Blessing of Wisdom",        -- Partial texture path for Greater Blessing of Wisdom
+    ["Magic_GreaterBlessingofKings"] = "Greater Blessing of Kings",        -- Partial texture path for Greater Blessing of Kings
+}
+
+
+-- Add a table to map classes to their respective blessings
+local CLASS_TO_BLESSING = {
+    ["WARRIOR"] = BLESSING_OF_KINGS,
+    ["PALADIN"] = BLESSING_OF_KINGS, -- Paladins might prefer Might or Kings depending on build
+    ["HUNTER"] = BLESSING_OF_MIGHT,
+    ["ROGUE"] = BLESSING_OF_MIGHT,
+    ["PRIEST"] = BLESSING_OF_WISDOM,
+    ["SHAMAN"] = BLESSING_OF_KINGS,
+    ["MAGE"] = BLESSING_OF_KINGS,
+    ["WARLOCK"] = BLESSING_OF_KINGS,
+    ["DRUID"] = BLESSING_OF_KINGS, -- Druids might prefer Wisdom or Kings depending on role
 }
 
 
@@ -97,6 +127,36 @@ local SpellTextureToName = {
 local combatEvents = {}
 local combatTimeout = 5 -- Time in seconds to consider an enemy out of combat
 local attackInterval = 2 -- Average attack interval in seconds
+
+local function IterateGroupMembers(callback)
+    -- Check party members (party1 to party4)
+    for i = 1, 4 do
+        local partyMember = "party" .. i
+        if UnitExists(partyMember) then
+            callback(partyMember)
+        end
+    end
+
+    -- Check raid members (raid1 to raid40) if in a raid
+    if GetNumRaidMembers() > 0 then
+        for i = 1, GetNumRaidMembers() do
+            local raidMember = "raid" .. i
+            if UnitExists(raidMember) then
+                callback(raidMember)
+            end
+        end
+    end
+end
+
+
+local function GetBlessingForUnit(unit)
+    local _, classToken = UnitClass(unit)
+    classToken = string.upper(classToken) -- Ensure it matches the table keys
+    local blessing = CLASS_TO_BLESSING[classToken] or BLESSING_OF_KINGS
+    --DEFAULT_CHAT_FRAME:AddMessage("Class for unit " .. UnitName(unit) .. ": " .. classToken)
+    --DEFAULT_CHAT_FRAME:AddMessage("Assigned blessing: " .. (blessing or "None (defaulting to Kings)"))
+    return blessing
+end
 
 -- Function to handle combat events from chat messages
 local function HandleCombatChatMessage(event, message)
@@ -214,21 +274,32 @@ local function HasDebuff(unit, debuffList)
     return false
 end
 
--- Function to check if a unit has a specific buff
 local function HasBuff(unit, buffName)
     for i = 1, 32 do
         local texture = UnitBuff(unit, i)
         if texture then
             -- Look up the spell name using the texture name
             for texturePath, spellName in pairs(SpellTextureToName) do
-                if strfind(texture, texturePath) and spellName == buffName then
-                    return true
+                if strfind(texture, texturePath) then
+                    -- Check if the buff name matches either the regular or greater version
+                    if spellName == buffName or spellName == "Greater " .. buffName then
+                        return true
+                    end
                 end
             end
         end
     end
     return false
 end
+
+local function AlwaysSanc()
+    -- Check if the player has either "Blessing of Sanctuary" or "Greater Blessing of Sanctuary"
+    if not HasBuff("player", BLESSING_OF_SANCTUARY) then
+        CastSpellByName(BLESSING_OF_SANCTUARY)
+        SpellTargetUnit("player")
+    end
+end
+
 
 local function ApplyPlayerBuffs()
     local currentMana = UnitMana("player")
@@ -243,15 +314,20 @@ local function ApplyPlayerBuffs()
 
     -- Apply seals regardless of whether blessings are enabled
     -- Check and apply Seal of Command (always, even in combat)
-    if not HasBuff("player", SEAL_OF_MODE) and manaLow == 0 then
+    if lightMode == 0 and not HasBuff("player", SEAL_OF_MODE) and manaLow == 0 then
         CastSpellByName(SEAL_OF_MODE)
         SpellTargetUnit("player")
         sealOfCommandCastTime = GetTime() -- Record the time the seal was cast
     end
 
     -- Check and apply Seal of Wisdom if mana is below 50%
-    if not HasBuff("player", SEAL_OF_WISDOM) and manaLow == 1 then
+    if not HasBuff("player", SEAL_OF_WISDOM) and manaLow == 1 and lightMode == 0 then
         CastSpellByName(SEAL_OF_WISDOM)
+        SpellTargetUnit("player")
+    end
+
+    if lightMode == 1 and not HasBuff("player", SEAL_OF_LIGHT) then
+        CastSpellByName(SEAL_OF_LIGHT)
         SpellTargetUnit("player")
     end
 
@@ -298,34 +374,33 @@ local function ApplyPartyBuffs()
 
     -- Only apply buffs if out of combat
     if not UnitAffectingCombat("player") then
-        for i = 1, 4 do
-            local partyMember = "party" .. i
-            if UnitExists(partyMember) and not UnitIsUnit(partyMember, "player") then
+        IterateGroupMembers(function(unit)
+            if not UnitIsUnit(unit, "player") then
                 if salvationMode == 1 then
-                    -- Apply Blessing of Salvation to all party members in salvation mode
-                    if not HasBuff(partyMember, BLESSING_OF_SALVATION) then
+                    -- Apply Blessing of Salvation to all group members in salvation mode
+                    if not HasBuff(unit, BLESSING_OF_SALVATION) then
                         CastSpellByName(BLESSING_OF_SALVATION)
-                        SpellTargetUnit(partyMember)
+                        SpellTargetUnit(unit)
+                    end
+                elseif kingsMode == 1 then
+                    -- Apply Blessing of Kings to all group members in kings mode
+                    if not HasBuff(unit, BLESSING_OF_KINGS) then
+                        CastSpellByName(BLESSING_OF_KINGS)
+                        SpellTargetUnit(unit)
                     end
                 else
-                    if IsManaUser(partyMember) then
-                        -- Apply Blessing of Wisdom to mana users
-                        if not HasBuff(partyMember, BLESSING_OF_WISDOM) then
-                            CastSpellByName(BLESSING_OF_WISDOM)
-                            SpellTargetUnit(partyMember)
-                        end
-                    else
-                        -- Apply Blessing of Might to non-mana users
-                        if not HasBuff(partyMember, BLESSING_OF_MIGHT) then
-                            CastSpellByName(BLESSING_OF_MIGHT)
-                            SpellTargetUnit(partyMember)
-                        end
+                    -- Get the appropriate blessing for the unit's class
+                    local blessing = GetBlessingForUnit(unit)
+                    if not HasBuff(unit, blessing) then
+                        CastSpellByName(blessing)
+                        SpellTargetUnit(unit)
                     end
                 end
             end
-        end
+        end)
     end
 end
+
 
 local function CastHammerOfWrath()
     local activeEnemies = UpdateCombatEvents()
@@ -353,7 +428,7 @@ local function CheckTargetsTarget()
                 -- Check if Hand of Reckoning is ready
                 if IsSpellReady("Hand of Reckoning") then
              --       DEFAULT_CHAT_FRAME:AddMessage("Casting Hand of Reckoning to taunt the target.")
-                    CastSpellByName("Hand of Reckoning")
+                    -- CastSpellByName("Hand of Reckoning")
                 end
             end
         end
@@ -400,12 +475,16 @@ local function CastAbilities()
                 CastSpellByName(JUDGEMENT)
             end
         end
-    else
-        -- Cast Judgement on cooldown if Seal of Wisdom is not active
-        --if IsSpellReady(JUDGEMENT) then
-            --CastSpellByName(JUDGEMENT)
-        --end
     end
+
+    if HasBuff("player", SEAL_OF_LIGHT) then
+        if not buffed("Judgement of Light", target) then
+            if IsSpellReady(JUDGEMENT) then
+                CastSpellByName(JUDGEMENT)
+            end
+        end
+    end
+
 
     -- Cast Crusader Strike and Holy Strike in an alternating fashion
     if strikeWeave == 1 and IsSpellReady(CRUSADER_STRIKE) then
@@ -443,34 +522,44 @@ local function CheckPartyHealth()
     local manaPercentage = (currentMana / maxMana) * 100
     local currentTime = GetTime()
 
-    -- Check for snares and cast Hand of Freedom first (highest priority)
+    -- Priority 1: Check for "Shaman_Hex" or "Polymorph" on group members (excluding self) and cleanse immediately
+    IterateGroupMembers(function(unit)
+        if not UnitIsUnit(unit, "player") then
+            if HasDebuff(unit, {"Shaman_Hex", "Polymorph", "Shadow_Possession", "Nature_Sleep"}) and manaPercentage > 5 then
+                -- Bypass the cleanse cooldown throttle for "Shaman_Hex" and "Polymorph"
+                CastSpellByName(DISPEL)
+                SpellTargetUnit(unit)
+                lastCleanseTime = currentTime -- Update the last cleanse time
+                return -- Exit the function immediately after cleansing
+            end
+        end
+    end)
+
+    -- Priority 2: Check for snares and cast Hand of Freedom
     if HasDebuff("player", DEBUFFS_TO_FREEDOM) and manaPercentage > 5 then
         CastSpellByName(FREEDOM)
         SpellTargetUnit("player")
         return
     end
 
-    -- Check party members for snares and cast Hand of Freedom first (highest priority)
-    for i = 1, 4 do
-        local partyMember = "party" .. i
-        if UnitExists(partyMember) then
-            if HasDebuff(partyMember, DEBUFFS_TO_FREEDOM) and manaPercentage > 5 then
-                CastSpellByName(FREEDOM)
-                SpellTargetUnit(partyMember)
-                return
-            end
+    -- Priority 3: Check group members for snares and cast Hand of Freedom
+    IterateGroupMembers(function(unit)
+        if HasDebuff(unit, DEBUFFS_TO_FREEDOM) and manaPercentage > 5 then
+            CastSpellByName(FREEDOM)
+            SpellTargetUnit(unit)
+            return
         end
-    end
+    end)
 
-    -- Check self first for other debuffs and low health
+    -- Priority 4: Check self for low health and cast Lay on Hands
     local selfHealth = UnitHealth("player") / UnitHealthMax("player") * 100
-    if selfHealth <= 10 then
+    if selfHealth <= 10 and UnitAffectingCombat("player") then
         CastSpellByName(LAY_ON_HANDS)
         SpellTargetUnit("player")
         return
     end
 
-    -- Check for other debuffs and cast Purify if needed, but only if the cooldown has passed
+    -- Priority 5: Check for other debuffs and cast Purify if needed (with cooldown throttle)
     if HasDebuff("player", DEBUFFS_TO_DISPEL) and manaPercentage > 5 then
         if currentTime - lastCleanseTime >= cleanseCooldown then
             CastSpellByName(DISPEL)
@@ -480,42 +569,39 @@ local function CheckPartyHealth()
         end
     end
 
-    -- Check party members for other debuffs and low health
-    for i = 1, 4 do
-        local partyMember = "party" .. i
-        if UnitExists(partyMember) then
-            local health = UnitHealth(partyMember) / UnitHealthMax(partyMember) * 100
+    -- Priority 6: Check group members for other debuffs and low health
+    IterateGroupMembers(function(unit)
+        local health = UnitHealth(unit) / UnitHealthMax(unit) * 100
 
-            -- Cast Lay on Hands if health is below 10%
-            if health <= 10 then
-                CastSpellByName(LAY_ON_HANDS)
-                SpellTargetUnit(partyMember)
-                return
-            end
+        -- Cast Lay on Hands if health is below 10%
+        if health <= 10 and UnitAffectingCombat(unit) then
+            CastSpellByName(LAY_ON_HANDS)
+            SpellTargetUnit(unit)
+            return
+        end
 
-            -- Cast Consecration if health is below 90% and in combat
-            if health <= 60 and UnitAffectingCombat("player") and manaPercentage >= 95 and IsSpellReady(CONSECRATION) then
-                CastSpellByName(CONSECRATION)
-            end
+        -- Cast Consecration if health is below 60% and in combat
+        if health <= 60 and UnitAffectingCombat("player") and manaPercentage >= 95 and IsSpellReady(CONSECRATION) then
+            CastSpellByName(CONSECRATION)
+        end
 
-            -- Check for other debuffs and cast Purify if needed, but only if the cooldown has passed
-            if HasDebuff(partyMember, DEBUFFS_TO_DISPEL) and manaPercentage > 5 then
-                if currentTime - lastCleanseTime >= cleanseCooldown then
-                    CastSpellByName(DISPEL)
-                    SpellTargetUnit(partyMember)
-                    lastCleanseTime = currentTime -- Update the last cleanse time
-                    return
-                end
-            end
-
-            -- Cast Hand of Protection if health is below 20% (excluding self)
-            if health <= 20 and not UnitIsUnit(partyMember, "player") then
-                CastSpellByName(HAND_OF_PROTECTION)
-                SpellTargetUnit(partyMember)
+        -- Check for other debuffs and cast Purify if needed (with cooldown throttle)
+        if HasDebuff(unit, DEBUFFS_TO_DISPEL) and manaPercentage > 5 then
+            if currentTime - lastCleanseTime >= cleanseCooldown then
+                CastSpellByName(DISPEL)
+                SpellTargetUnit(unit)
+                lastCleanseTime = currentTime -- Update the last cleanse time
                 return
             end
         end
-    end
+
+        -- Cast Hand of Protection if health is below 20% (excluding self)
+        if health <= 20 and not UnitIsUnit(unit, "player") then
+            CastSpellByName(HAND_OF_PROTECTION)
+            SpellTargetUnit(unit)
+            return
+        end
+    end)
 end
 
 -- Function to heal myself and party members when out of combat and health is below 90%
@@ -565,25 +651,66 @@ local function ToggleProtMode()
     end
 end
 
--- Function to toggle salvation mode
 local function ToggleSalvationMode()
     if salvationMode == 0 then
         salvationMode = 1
+        kingsMode = 0 -- Disable Kings Mode
+        DEFAULT_CHAT_FRAME:AddMessage("Salvation Mode is now enabled. Kings Mode is disabled.")
     else
         salvationMode = 0
+        DEFAULT_CHAT_FRAME:AddMessage("Salvation Mode is now disabled.")
     end
+end
+
+local function ToggleKingsMode()
+    if kingsMode == 0 then
+        kingsMode = 1
+        salvationMode = 0 -- Disable Salvation Mode
+        DEFAULT_CHAT_FRAME:AddMessage("Kings Mode is now enabled. Salvation Mode is disabled.")
+    else
+        kingsMode = 0
+        DEFAULT_CHAT_FRAME:AddMessage("Kings Mode is now disabled.")
+    end
+end
+
+local function ToggleSancMode()
+    if sancMode == 0 then
+        sancMode = 1
+        DEFAULT_CHAT_FRAME:AddMessage("Sanc Mode is now enabled.")
+    else
+        sancMode = 0
+        DEFAULT_CHAT_FRAME:AddMessage("Sanc Mode is now disabled.")
+    end
+end
+
+local function ToggleLightMode()
+    if lightMode == 0 then
+        lightMode = 1
+        DEFAULT_CHAT_FRAME:AddMessage("Light Mode is now enabled.")
+    else
+        lightMode = 0
+        DEFAULT_CHAT_FRAME:AddMessage("Light Mode is now disabled.")
+    end
+end
+
+-- Register slash command to toggle Light Mode
+SLASH_CRUSADERLIGHT1 = "/crusader-light"
+SlashCmdList["CRUSADERLIGHT"] = function()
+    ToggleLightMode()
 end
 
 -- Register slash commands
 SLASH_CRUSADER1 = "/crusader"
 SlashCmdList["CRUSADER"] = function()
-    if not HasBuff("player", "Bladestorm") then
         CheckPartyHealth()
         ApplyPartyBuffs()
         ApplyPlayerBuffs()
         CastAbilities()
         HealOutOfCombat()
         CheckTargetsTarget() -- Check your target's target and cast Hand of Reckoning if needed
+    -- Apply Sanc Mode if enabled
+        if sancMode == 1 then
+        AlwaysSanc()
     end
 end
 
@@ -600,6 +727,16 @@ end
 SLASH_CRUSADERSALV1 = "/crusader-salv"
 SlashCmdList["CRUSADERSALV"] = function()
     ToggleSalvationMode()
+end
+
+SLASH_CRUSADERKINGS1 = "/crusader-kings"
+SlashCmdList["CRUSADERKINGS"] = function()
+    ToggleKingsMode()
+end
+
+SLASH_CRUSADERSANC1 = "/crusader-sanc"
+SlashCmdList["CRUSADERSANC"] = function()
+    ToggleSancMode()
 end
 
 -- Function to toggle blessings
