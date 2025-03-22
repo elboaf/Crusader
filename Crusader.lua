@@ -75,6 +75,8 @@ local DEBUFFS_TO_DISPEL = {
     "FrostArmor",
     "Shadow_Possession",
     "SummonWaterElemental",
+    "Nature_Cyclone",
+    "GolemThunderClap",
     -- Add more debuff names here as ne,eeded
 }
 
